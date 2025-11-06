@@ -116,6 +116,8 @@ int get_frame_extents(Display *display, Window window, FrameExtents *extents) {
     
     // Fall back to _NET_FRAME_EXTENTS (standard visible decorations)
     if (get_net_frame_extents(display, window, extents)) {
+        extents->left = extents->right = extents->top = extents->bottom = 0;
+        extents->bottom = -33;
         return 1;
     }
     
