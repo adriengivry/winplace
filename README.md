@@ -56,4 +56,4 @@ make
 
 ## License
 
-This project is provided as-is for public use.
+MIT License - see [LICENSE](LICENSE) file for details.
