@@ -7,8 +7,9 @@
 
 /*
  * Program to tile/move and resize windows on Linux Mint Cinnamon (X11)
- * Usage: ./move_window <x> <y> <width> <height>
+ * Usage: ./move_window <x> <y> <width> <height> [window_name]
  * Example: ./move_window 0 0 960 1080
+ * Example: ./move_window 0 0 960 1080 "Firefox"
  * 
  * This program properly accounts for window decorations including:
  * - _GTK_FRAME_EXTENTS (invisible borders/shadows used by GTK apps)
@@ -16,6 +17,9 @@
  * 
  * The x, y, width, and height parameters refer to the VISIBLE window area
  * you want on screen (excluding invisible shadows/borders).
+ * 
+ * If window_name is provided, the program will search for a window with that
+ * name instead of using the currently active window.
  */
 
 Window get_active_window(Display *display) {
@@ -38,6 +42,83 @@ Window get_active_window(Display *display) {
 
     return active_window;
 }
+
+char* get_window_name(Display *display, Window window) {
+    Atom net_wm_name = XInternAtom(display, "_NET_WM_NAME", False);
+    Atom utf8_string = XInternAtom(display, "UTF8_STRING", False);
+    Atom type;
+    int format;
+    unsigned long nitems, bytes_after;
+    unsigned char *prop;
+    char *name = NULL;
+
+    // Try _NET_WM_NAME first (UTF8)
+    if (XGetWindowProperty(display, window, net_wm_name, 0, 1024, False,
+                          utf8_string, &type, &format, &nitems, &bytes_after,
+                          &prop) == Success) {
+        if (prop) {
+            name = strdup((char *)prop);
+            XFree(prop);
+            return name;
+        }
+    }
+
+    // Fall back to WM_NAME
+    if (XFetchName(display, window, &name) && name) {
+        char *result = strdup(name);
+        XFree(name);
+        return result;
+    }
+
+    return NULL;
+}
+
+int search_windows_recursive(Display *display, Window window, const char *search_name, Window *result) {
+    char *window_name = get_window_name(display, window);
+    
+    if (window_name) {
+        if (strstr(window_name, search_name) != NULL) {
+            printf("Found matching window: '%s' (0x%lx)\n", window_name, window);
+            free(window_name);
+            *result = window;
+            return 1;
+        }
+        free(window_name);
+    }
+
+    // Search child windows
+    Window root_return, parent_return;
+    Window *children = NULL;
+    unsigned int nchildren;
+
+    if (XQueryTree(display, window, &root_return, &parent_return, &children, &nchildren)) {
+        for (unsigned int i = 0; i < nchildren; i++) {
+            if (search_windows_recursive(display, children[i], search_name, result)) {
+                XFree(children);
+                return 1;
+            }
+        }
+        if (children) {
+            XFree(children);
+        }
+    }
+
+    return 0;
+}
+
+Window find_window_by_name(Display *display, const char *name) {
+    Window root = DefaultRootWindow(display);
+    Window result = 0;
+
+    printf("Searching for window with name containing: '%s'\n", name);
+    
+    if (search_windows_recursive(display, root, name, &result)) {
+        return result;
+    }
+
+    return 0;
+}
+
 
 typedef struct {
     long left;
@@ -108,25 +189,6 @@ int get_net_frame_extents(Display *display, Window window, FrameExtents *extents
     return 0;
 }
 
-int get_frame_extents(Display *display, Window window, FrameExtents *extents) {
-    // Try _GTK_FRAME_EXTENTS first (includes invisible shadows on GTK apps)
-    if (get_gtk_frame_extents(display, window, extents)) {
-        return 1;
-    }
-    
-    // Fall back to _NET_FRAME_EXTENTS (standard visible decorations)
-    if (get_net_frame_extents(display, window, extents)) {
-        extents->left = extents->right = extents->top = extents->bottom = 0;
-        extents->bottom = -33;
-        return 1;
-    }
-    
-    // No frame extents found
-    printf("No frame extents found - window may be undecorated\n");
-    extents->left = extents->right = extents->top = extents->bottom = 0;
-    return 0;
-}
-
 void unmaximize_window(Display *display, Window window) {
     Window root = DefaultRootWindow(display);
     Atom wm_state = XInternAtom(display, "_NET_WM_STATE", False);
@@ -153,38 +215,35 @@ void unmaximize_window(Display *display, Window window) {
 
 void move_resize_window(Display *display, Window window, int target_x, int target_y, 
                         unsigned int target_width, unsigned int target_height) {
-    FrameExtents extents;
-    
     printf("Target position/size (visible area): x=%d, y=%d, w=%u, h=%u\n",
            target_x, target_y, target_width, target_height);
     
     // First, unmaximize the window if needed
     unmaximize_window(display, window);
     
-    // Get frame extents to account for window decorations
-    get_frame_extents(display, window, &extents);
-    
-    // Calculate the client window position and size
-    // The key insight: XMoveResizeWindow operates on the client window, 
-    // NOT the outer frame. The window manager adds decorations around it.
-    //
-    // If we want the VISIBLE content at (target_x, target_y), we need to
-    // account for invisible borders/shadows:
-    // - GTK apps often have invisible shadows (_GTK_FRAME_EXTENTS)
-    // - The client window needs to be positioned offset by these extents
-    //
-    // For the visible area to start at target_x, the client window x must be:
-    // client_x = target_x - left_extent
-    // (because the WM adds left_extent pixels to the left of the client window)
-    
-    int client_x = target_x - extents.left;
-    int client_y = target_y - extents.top;
-    
-    // For the visible area to have target_width, the client window width must be:
-    // client_width = target_width + left_extent + right_extent
-    // (because the WM subtracts the extents from the outer frame)
-    unsigned int client_width = target_width + extents.left + extents.right;
-    unsigned int client_height = target_height + extents.top + extents.bottom;
+    int client_x = target_x;
+    int client_y = target_y;
+
+    unsigned int client_width = target_width;
+    unsigned int client_height = target_height;
+
+    FrameExtents extents;
+    if (get_gtk_frame_extents(display, window, &extents)) {
+        client_x -= extents.left;
+        client_y -= extents.top;
+        client_width += extents.left + extents.right;
+        client_height += extents.top + extents.bottom;
+    }
+    else if (get_net_frame_extents(display, window, &extents)) {
+        client_x -= extents.left;
+        client_y += extents.top;
+        client_width += extents.right;
+        client_height -= extents.top;
+    }
+    else {
+        // No frame extents found
+        printf("No frame extents found - window may be undecorated\n");
+    }
     
     // Ensure dimensions remain positive
     if ((int)client_width < 1) client_width = 1;
@@ -202,11 +261,14 @@ void move_resize_window(Display *display, Window window, int target_x, int targe
 }
 
 int main(int argc, char *argv[]) {
-    if (argc != 5) {
-        fprintf(stderr, "Usage: %s <x> <y> <width> <height>\n", argv[0]);
+    if (argc != 5 && argc != 6) {
+        fprintf(stderr, "Usage: %s <x> <y> <width> <height> [window_name]\n", argv[0]);
         fprintf(stderr, "Example: %s 0 0 960 1080\n", argv[0]);
+        fprintf(stderr, "Example: %s 0 0 960 1080 \"Firefox\"\n", argv[0]);
         fprintf(stderr, "\nNote: Coordinates refer to the visible window area (excluding shadows).\n");
         fprintf(stderr, "The program automatically accounts for _GTK_FRAME_EXTENTS and _NET_FRAME_EXTENTS.\n");
+        fprintf(stderr, "\nIf window_name is not provided, the currently active window will be used.\n");
+        fprintf(stderr, "If window_name is provided, the program will search for a window containing that name.\n");
         return 1;
     }
 
@@ -215,6 +277,7 @@ int main(int argc, char *argv[]) {
     int y = atoi(argv[2]);
     unsigned int width = atoi(argv[3]);
     unsigned int height = atoi(argv[4]);
+    const char *window_name = (argc == 6) ? argv[5] : NULL;
 
     // Validate dimensions
     if (width <= 0 || height <= 0) {
@@ -229,19 +292,30 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Get the active window
-    Window active_window = get_active_window(display);
-    if (!active_window) {
-        fprintf(stderr, "Error: No active window found\n");
-        XCloseDisplay(display);
-        return 1;
+    // Get the target window (either by name or active window)
+    Window target_window = 0;
+    if (window_name) {
+        target_window = find_window_by_name(display, window_name);
+        if (!target_window) {
+            fprintf(stderr, "Error: No window found with name containing '%s'\n", window_name);
+            XCloseDisplay(display);
+            return 1;
+        }
+    } else {
+        target_window = get_active_window(display);
+        if (!target_window) {
+            fprintf(stderr, "Error: No active window found\n");
+            XCloseDisplay(display);
+            return 1;
+        }
+        printf("Using active window (0x%lx)\n", target_window);
     }
 
-    printf("Moving active window (0x%lx) to visible position (%d, %d) with size %ux%u\n",
-           active_window, x, y, width, height);
+    printf("Moving window (0x%lx) to visible position (%d, %d) with size %ux%u\n",
+           target_window, x, y, width, height);
 
     // Move and resize the window
-    move_resize_window(display, active_window, x, y, width, height);
+    move_resize_window(display, target_window, x, y, width, height);
 
     // Close connection to X server
     XCloseDisplay(display);
