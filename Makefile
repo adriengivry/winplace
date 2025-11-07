@@ -20,3 +20,11 @@ uninstall:
 	rm -f /usr/local/bin/$(TARGET)
 
 .PHONY: all clean install uninstall
+
+test1:
+	./move_window 3840 700 1280 700 Home
+	./move_window 3840 0 1280 700 Signal
+
+test2:
+	./move_window 3840 700 1280 700 Signal
+	./move_window 3840 0 1280 700 Home

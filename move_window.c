@@ -1,5 +1,6 @@
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
+#include <X11/Xutil.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -213,6 +214,21 @@ void unmaximize_window(Display *display, Window window) {
     usleep(50000); // 50ms delay to let WM process
 }
 
+void set_window_gravity(Display *dpy, Window win, int gravity) {
+    XSizeHints hints;
+    long supplied;
+
+    // Get existing hints if any
+    if (XGetWMNormalHints(dpy, win, &hints, &supplied) == 0) {
+        hints.flags = 0;
+    }
+
+    hints.flags |= PWinGravity;
+    hints.win_gravity = gravity;
+
+    XSetWMNormalHints(dpy, win, &hints);
+}
+
 void move_resize_window(Display *display, Window window, int target_x, int target_y, 
                         unsigned int target_width, unsigned int target_height) {
     printf("Target position/size (visible area): x=%d, y=%d, w=%u, h=%u\n",
@@ -228,17 +244,20 @@ void move_resize_window(Display *display, Window window, int target_x, int targe
     unsigned int client_height = target_height;
 
     FrameExtents extents;
+
+    // _GTK_FRAME_EXTENTS tell you how much EXTRA SPACE to REMOVE from your Window Size calculations.
     if (get_gtk_frame_extents(display, window, &extents)) {
         client_x -= extents.left;
         client_y -= extents.top;
         client_width += extents.left + extents.right;
         client_height += extents.top + extents.bottom;
     }
-    else if (get_net_frame_extents(display, window, &extents)) {
-        client_x -= extents.left;
-        client_y += extents.top;
-        client_width += extents.right;
-        client_height -= extents.top;
+    
+    // _NET_FRAME_EXTENTS tell you how much EXTRA SPACE to ADD to your Window Size calculations.
+    if (get_net_frame_extents(display, window, &extents)) {
+        set_window_gravity(display, window, NorthWestGravity);
+        client_width -= extents.left + extents.right;
+        client_height -= extents.top + extents.bottom;
     }
     else {
         // No frame extents found
