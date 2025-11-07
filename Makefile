@@ -1,30 +1,34 @@
-CC = gcc
-CFLAGS = -Wall -Wextra -O2
-LDFLAGS = -lX11
+CC       := gcc
+CFLAGS   := -Wall -Wextra -O2
+LDFLAGS  := -lX11
 
-TARGET = move_window
-SRC = move_window.c
+# Project naming
+PROJECT   := winplace
+SRC_DIR   := src
+BUILD_DIR := build
+
+SRCS := $(SRC_DIR)/main.c
+OBJS := $(BUILD_DIR)/main.o
+TARGET := $(BUILD_DIR)/$(PROJECT)
+
+.PHONY: all clean install uninstall dirs
 
 all: $(TARGET)
 
-$(TARGET): $(SRC)
-	$(CC) $(CFLAGS) -o $(TARGET) $(SRC) $(LDFLAGS)
+dirs:
+	mkdir -p $(BUILD_DIR)
+
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | dirs
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(TARGET): $(OBJS) | dirs
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
 clean:
-	rm -f $(TARGET)
+	rm -rf $(BUILD_DIR)
 
 install: $(TARGET)
-	install -m 755 $(TARGET) /usr/local/bin/
+	install -m 755 $(TARGET) /usr/local/bin/$(PROJECT)
 
 uninstall:
-	rm -f /usr/local/bin/$(TARGET)
-
-.PHONY: all clean install uninstall
-
-test1:
-	./move_window 3840 700 1280 700 Home
-	./move_window 3840 0 1280 700 Signal
-
-test2:
-	./move_window 3840 700 1280 700 Signal
-	./move_window 3840 0 1280 700 Home
+	rm -f /usr/local/bin/$(PROJECT)

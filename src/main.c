@@ -7,20 +7,21 @@
 #include <unistd.h>
 
 /*
- * Program to tile/move and resize windows on Linux Mint Cinnamon (X11)
- * Usage: ./move_window <x> <y> <width> <height> [window_name]
- * Example: ./move_window 0 0 960 1080
- * Example: ./move_window 0 0 960 1080 "Firefox"
- * 
- * This program properly accounts for window decorations including:
- * - _GTK_FRAME_EXTENTS (invisible borders/shadows used by GTK apps)
- * - _NET_FRAME_EXTENTS (standard frame extents)
- * 
- * The x, y, width, and height parameters refer to the VISIBLE window area
- * you want on screen (excluding invisible shadows/borders).
- * 
- * If window_name is provided, the program will search for a window with that
- * name instead of using the currently active window.
+ * winplace: tile/move and resize windows on X11 (Linux Mint Cinnamon tested)
+ *
+ * Usage: ./winplace <x> <y> <width> <height> [window_name]
+ * Example: ./winplace 0 0 960 1080
+ * Example: ./winplace 0 0 960 1080 "Firefox"
+ *
+ * Automatically accounts for window decorations:
+ *   - _GTK_FRAME_EXTENTS (extra invisible border/shadow space)
+ *   - _NET_FRAME_EXTENTS (standard frame extents)
+ *
+ * The x, y, width, and height parameters refer to the desired visible window
+ * area (excluding invisible shadows/borders).
+ *
+ * If window_name is provided, the program searches for a window whose title
+ * contains that substring; otherwise the currently active window is used.
  */
 
 Window get_active_window(Display *display) {
